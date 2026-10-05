@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Universal Data Converter & CRC Tool</title>
+<style>
+body{margin:0;background:#0f172a;color:#e5e7eb;font:15px system-ui,sans-serif}
+.wrap{max-width:1100px;width:94%;margin:30px auto}
+.card{background:#111827;border:1px solid #334155;border-radius:14px;padding:20px;margin:16px 0}
+h1{margin-bottom:5px} h2{margin-top:0}.muted{color:#94a3b8}.small{font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.row{display:grid;grid-template-columns:1fr 260px;gap:14px}
+@media(max-width:750px){.grid,.grid3,.row{grid-template-columns:1fr}}
+label{display:block;font-weight:700;margin-bottom:7px}
+textarea,select,input[type=text]{width:100%;box-sizing:border-box;background:#020617;color:#e5e7eb;border:1px solid #334155;border-radius:9px;padding:11px;font:14px monospace}
+textarea{min-height:110px;resize:vertical}
+.out{background:#020617;border:1px solid #334155;border-radius:9px;padding:11px;min-height:48px;white-space:pre-wrap;word-break:break-all;font:14px monospace;cursor:pointer}
+.out:hover{border-color:#38bdf8}
+.out:empty::after{content:"—";color:#475569}
+button{border:0;border-radius:8px;padding:10px 15px;margin:10px 7px 0 0;font-weight:bold;cursor:pointer;background:#38bdf8;color:#082f49}
+.secondary{background:#475569;color:white}
+.check{display:flex;gap:8px;align-items:center;margin-top:15px;font-weight:600}.check input{width:18px;height:18px}
+.inline{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+.ok{color:#22c55e}.err{color:#ef4444}.warn{color:#f59e0b}
+table{width:100%;border-collapse:collapse;font:13px monospace}
+th,td{border-bottom:1px solid #334155;padding:7px 8px;text-align:left;vertical-align:top;word-break:break-all}
+th{color:#94a3b8;font-weight:600}
+#toast{position:fixed;bottom:20px;right:20px;background:#22c55e;color:#052e16;padding:10px 14px;border-radius:8px;display:none;font-weight:bold;z-index:9}
+#status{margin-top:10px;min-height:1.2em;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Universal Data Converter &amp; CRC Tool</h1>
+<p class="muted">Hex • Decimal • Octal • Binary • Base64 • ASCII/UTF-8 • Integers &amp; Floats • Checksums • CRC (catalog + custom, verify &amp; append)</p>
+
+<div class="card">
+<div class="row">
+<div>
+<label>Input Data</label>
+<textarea id="input" placeholder="Example: 41 4D 6B 42 56 77 3D 3D   |   0x41,0x4D   |   414D6B42"></textarea>
+<div class="muted small">Separators accepted: space, comma, semicolon, colon, newline, 0x prefix. Hex may also be one continuous string.</div>
+</div>
+<div>
+<label>Input Format</label>
+<select id="type" onchange="convert()">
+<option value="hex">Hex</option>
+<option value="decimal">Decimal (0-255, or -128..127)</option>
+<option value="octal">Octal</option>
+<option value="binary">Binary</option>
+<option value="base64">Base64</option>
+<option value="text">ASCII / UTF-8</option>
+</select>
+<label class="check"><input type="checkbox" id="auto" checked> Auto-convert while typing</label>
+<button onclick="convert()">Convert</button>
+<button class="secondary" onclick="clearAll()">Clear</button>
+<button class="secondary" onclick="document.getElementById('file').click()">Load file…</button>
+<input type="file" id="file" hidden onchange="loadFile(this)">
+</div>
+</div>
+<div id="status"></div>
+</div>
+
+<div class="card">
+<h2>Conversions <span class="muted small">(click any box to copy)</span></h2>
+<div class="grid">
+<div><label>Hex</label><div id="hex" class="out"></div></div>
+<div><label>Hex (continuous)</label><div id="hexc" class="out"></div></div>
+<div><label>Hex (C array)</label><div id="hexarr" class="out"></div></div>
+<div><label>Decimal</label><div id="dec" class="out"></div></div>
+<div><label>Octal</label><div id="oct" class="out"></div></div>
+<div><label>Binary</label><div id="bin" class="out"></div></div>
+<div><label>Base64</label><div id="b64" class="out"></div></div>
+<div><label>ASCII / UTF-8 <span class="muted small">(control bytes shown as \xNN)</span></label><div id="text" class="out"></div></div>
+<div><label>Reversed byte order (Hex)</label><div id="rev" class="out"></div></div>
+<div><label>Bit-reversed bytes (Hex)</label><div id="bitrev" class="out"></div></div>
+</div>
+</div>
+
+<div class="card">
+<h2>Numeric / Byte Information</h2>
+<div class="grid3">
+<div><label>Data Length</label><div id="len" class="out"></div></div>
+<div><label>Unsigned 8-bit</label><div id="u8" class="out"></div></div>
+<div><label>Signed 8-bit</label><div id="s8" class="out"></div></div>
+</div>
+<p class="muted small">Multi-byte values are interpreted from the first bytes of the data.</p>
+<table>
+<thead><tr><th>Type</th><th>Big-endian</th><th>Little-endian</th></tr></thead>
+<tbody id="numtbl"></tbody>
+</table>
+<div class="grid" style="margin-top:14px">
+<div><label class="inline">All 16-bit words <select id="wordEnd" style="width:auto;padding:4px 8px" onchange="render()"><option value="be">Big-endian</option><option value="le">Little-endian</option></select></label><div id="w16" class="out"></div></div>
+<div><label>All 32-bit words (same byte order)</label><div id="w32" class="out"></div></div>
+</div>
+</div>
+
+<div class="card">
+<h2>Simple Checksums</h2>
+<div class="grid3">
+<div><label>Sum-8 (mod 256)</label><div id="sum8" class="out"></div></div>
+<div><label>Two's-complement checksum</label><div id="sum8n" class="out"></div></div>
+<div><label>XOR-8 (LRC / BCC)</label><div id="xor8" class="out"></div></div>
+<div><label>Sum-16 (mod 65536)</label><div id="sum16" class="out"></div></div>
+<div><label>Fletcher-16</label><div id="fl16" class="out"></div></div>
+<div><label>Adler-32</label><div id="adler" class="out"></div></div>
+</div>
+</div>
+
+<div class="card">
+<h2>CRC</h2>
+<div class="grid">
+<div>
+<label>CRC Algorithm</label>
+<select id="crcType" onchange="crcUpdate()"></select>
+<div id="crcParams" class="muted small" style="margin-top:8px"></div>
+</div>
+<div>
+<label>CRC byte order (for append / verify)</label>
+<select id="crcEnd" onchange="crcUpdate()">
+<option value="be">Big-endian (MSB first)</option>
+<option value="le">Little-endian (LSB first)</option>
+</select>
+<label class="check"><input type="checkbox" id="already" onchange="crcUpdate()"> CRC is already appended to input (verify it)</label>
+</div>
+</div>
+
+<div id="custom" class="grid3" style="display:none;margin-top:10px">
+<div><label>Width (8–32)</label><input type="text" id="cw" value="16" oninput="crcUpdate()"></div>
+<div><label>Polynomial (hex)</label><input type="text" id="cp" value="1021" oninput="crcUpdate()"></div>
+<div><label>Init (hex)</label><input type="text" id="ci" value="FFFF" oninput="crcUpdate()"></div>
+<div><label>XOR out (hex)</label><input type="text" id="cx" value="0" oninput="crcUpdate()"></div>
+<div><label class="check" style="margin-top:0"><input type="checkbox" id="crin" onchange="crcUpdate()"> Reflect input</label></div>
+<div><label class="check" style="margin-top:0"><input type="checkbox" id="crout" onchange="crcUpdate()"> Reflect output</label></div>
+</div>
+
+<p class="muted small">CRC is calculated over the decoded input bytes. In verify mode the last <i>width/8</i> bytes are treated as the received CRC and compared against the CRC of the remaining payload. The input itself is never modified; the "Data + CRC" boxes are separate outputs you can copy.</p>
+<div class="grid">
+<div><label>CRC Result</label><div id="crc" class="out"></div></div>
+<div><label>Verification</label><div id="crcver" class="out"></div></div>
+<div><label>Data + CRC (Hex, selected byte order)</label><div id="crcapp" class="out"></div></div>
+<div><label>Data + CRC (Base64)</label><div id="crcappb64" class="out"></div></div>
+</div>
+<button class="secondary" onclick="selfTest()">Run CRC self-test (check value "123456789")</button>
+<div id="selftest" class="small" style="margin-top:10px"></div>
+</div>
+</div>
+<div id="toast">Copied</div>
+
+<script>
+let bytes=[];
+const $=id=>document.getElementById(id);
+const set=(id,s)=>{$(id).textContent=s};
+const hx=(v,w)=>'0x'+v.toString(16).padStart(w,'0').toUpperCase();
+const hex2=v=>v.toString(16).padStart(2,'0').toUpperCase();
+
+/* ---------- parsers ---------- */
+function hexParse(s){
+ s=s.replace(/0x/gi,' ').replace(/\\x/gi,' ').replace(/[,\n\r\t;:]+/g,' ').trim();
+ if(!s)return[];
+ const out=[];
+ for(const x of s.split(/\s+/)){
+   if(!/^[0-9a-f]+$/i.test(x))throw Error('Invalid hex: '+x);
+   if(x.length<=2){out.push(parseInt(x,16));continue}
+   if(x.length%2)throw Error('Hex group "'+x+'" has an odd number of digits');
+   x.match(/../g).forEach(h=>out.push(parseInt(h,16)));
+ }
+ return out;
+}
+function numParse(s,base,label){
+ const re={10:/^-?\d+$/,8:/^[0-7]+$/,2:/^[01]+$/}[base];
+ const out=[];
+ for(let x of s.trim().split(/[\s,;:]+/).filter(Boolean)){
+   x=x.replace(/^0o/i,'').replace(/^0b/i,'');
+   if(!re.test(x))throw Error('Invalid '+label+' value: '+x);
+   if(base===2&&x.length>8){
+     if(x.length%8)throw Error('Binary group "'+x+'" is not a multiple of 8 bits');
+     x.match(/.{8}/g).forEach(b=>out.push(parseInt(b,2)));continue;
+   }
+   let v=parseInt(x,base);
+   if(base===10&&v<0){if(v<-128)throw Error('Decimal value out of range: '+x);v+=256}
+   if(v>255)throw Error(label+' value out of byte range (0-255): '+x);
+   out.push(v);
+ }
+ return out;
+}
+function b64Parse(s){
+ s=s.replace(/\s/g,'').replace(/-/g,'+').replace(/_/g,'/');
+ while(s.length%4)s+='=';
+ try{return[...atob(s)].map(c=>c.charCodeAt(0))}catch(e){throw Error('Invalid Base64')}
+}
+const textParse=s=>[...new TextEncoder().encode(s)];
+function b64(a){let s='';a.forEach(x=>s+=String.fromCharCode(x));return btoa(s)}
+function toText(a){
+ const s=new TextDecoder('utf-8').decode(new Uint8Array(a));
+ return [...s].map(c=>{const k=c.codePointAt(0);return(k<32||k===127)?'\\x'+hex2(k):c}).join('');
+}
+const reflect=(v,n)=>{let r=0;for(let i=0;i<n;i++)if(v&(1<<i))r|=1<<(n-1-i);return r>>>0};
+
+/* ---------- main ---------- */
+function convert(){
+ const st=$('status');
+ try{
+  const s=$('input').value,t=$('type').value;
+  if(t==='hex')bytes=hexParse(s);
+  else if(t==='decimal')bytes=numParse(s,10,'decimal');
+  else if(t==='octal')bytes=numParse(s,8,'octal');
+  else if(t==='binary')bytes=numParse(s,2,'binary');
+  else if(t==='base64')bytes=b64Parse(s);
+  else bytes=textParse(s);
+  render();
+  st.textContent=bytes.length?`Converted ${bytes.length} byte(s).`:'';st.className='ok';
+ }catch(e){bytes=[];render();st.textContent=e.message;st.className='err'}
+}
+
+function render(){
+ const n=bytes.length;
+ if(!n){document.querySelectorAll('.out').forEach(x=>x.textContent='');$('numtbl').innerHTML='';crcUpdate();return}
+ set('hex',bytes.map(hex2).join(' '));
+ set('hexc',bytes.map(hex2).join(''));
+ set('hexarr','{ '+bytes.map(x=>'0x'+hex2(x)).join(', ')+' }');
+ set('dec',bytes.join(', '));
+ set('oct',bytes.map(x=>x.toString(8).padStart(3,'0')).join(' '));
+ set('bin',bytes.map(x=>x.toString(2).padStart(8,'0')).join(' '));
+ set('b64',b64(bytes));
+ set('text',toText(bytes));
+ set('rev',[...bytes].reverse().map(hex2).join(' '));
+ set('bitrev',bytes.map(x=>hex2(reflect(x,8))).join(' '));
+ set('u8',bytes.join(', '));
+ set('s8',bytes.map(x=>x<128?x:x-256).join(', '));
+ set('len',`${n} byte(s) / ${n*8} bit(s)`);
+
+ /* numeric table */
+ const dv=new DataView(new Uint8Array(bytes).buffer);
+ const rows=[];
+ const fmtF=v=>Number.isFinite(v)?(Math.abs(v)!==0&&(Math.abs(v)<1e-4||Math.abs(v)>=1e9)?v.toExponential(6):String(v)):String(v);
+ const add=(name,need,f)=>rows.push(`<tr><td>${name}</td><td>${n>=need?f(false):'—'}</td><td>${n>=need?f(true):'—'}</td></tr>`);
+ add('Unsigned 16-bit',2,le=>{const v=dv.getUint16(0,le);return `${v} (${hx(v,4)})`});
+ add('Signed 16-bit',2,le=>dv.getInt16(0,le));
+ add('Unsigned 32-bit',4,le=>{const v=dv.getUint32(0,le);return `${v} (${hx(v,8)})`});
+ add('Signed 32-bit',4,le=>dv.getInt32(0,le));
+ add('Unsigned 64-bit',8,le=>{const v=dv.getBigUint64(0,le);return `${v} (0x${v.toString(16).padStart(16,'0').toUpperCase()})`});
+ add('Signed 64-bit',8,le=>dv.getBigInt64(0,le).toString());
+ add('Float32 (IEEE 754)',4,le=>fmtF(dv.getFloat32(0,le)));
+ add('Float64 (IEEE 754)',8,le=>fmtF(dv.getFloat64(0,le)));
+ $('numtbl').innerHTML=rows.join('');
+
+ /* word views */
+ const le=$('wordEnd').value==='le',w16=[],w32=[];
+ for(let i=0;i+1<n;i+=2){const v=dv.getUint16(i,le);w16.push(hx(v,4))}
+ for(let i=0;i+3<n;i+=4){const v=dv.getUint32(i,le);w32.push(hx(v,8))}
+ set('w16',w16.join(' ')+(n%2?`\n(${n%2} trailing byte ignored)`:''));
+ set('w32',w32.join(' ')+(n%4?`\n(${n%4} trailing byte(s) ignored)`:''));
+
+ /* checksums */
+ const sum=bytes.reduce((a,b)=>a+b,0);
+ set('sum8',`${hx(sum&255,2)}  (${sum&255})`);
+ set('sum8n',`${hx((256-(sum&255))&255,2)}  (${(256-(sum&255))&255})`);
+ set('xor8',`${hx(bytes.reduce((a,b)=>a^b,0),2)}  (${bytes.reduce((a,b)=>a^b,0)})`);
+ set('sum16',`${hx(sum&65535,4)}  (${sum&65535})`);
+ let f1=0,f2=0;for(const b of bytes){f1=(f1+b)%255;f2=(f2+f1)%255}
+ set('fl16',`${hx((f2<<8)|f1,4)}  (${(f2<<8)|f1})`);
+ let a1=1,a2=0;for(const b of bytes){a1=(a1+b)%65521;a2=(a2+a1)%65521}
+ const ad=((a2<<16)|a1)>>>0;set('adler',`${hx(ad,8)}  (${ad})`);
+ crcUpdate();
+}
+
+/* ---------- CRC engine ---------- */
+const CRC_CATALOG={
+ 'CRC-8 (SMBus, poly 0x07)':{w:8,poly:0x07,init:0,refin:false,refout:false,xorout:0,check:0xF4},
+ 'CRC-8/MAXIM (1-Wire)':{w:8,poly:0x31,init:0,refin:true,refout:true,xorout:0,check:0xA1},
+ 'CRC-8/SAE-J1850':{w:8,poly:0x1D,init:0xFF,refin:false,refout:false,xorout:0xFF,check:0x4B},
+ 'CRC-16/CCITT-FALSE (CCSDS)':{w:16,poly:0x1021,init:0xFFFF,refin:false,refout:false,xorout:0,check:0x29B1},
+ 'CRC-16/XMODEM':{w:16,poly:0x1021,init:0,refin:false,refout:false,xorout:0,check:0x31C3},
+ 'CRC-16/KERMIT':{w:16,poly:0x1021,init:0,refin:true,refout:true,xorout:0,check:0x2189},
+ 'CRC-16/X-25 (IBM-SDLC)':{w:16,poly:0x1021,init:0xFFFF,refin:true,refout:true,xorout:0xFFFF,check:0x906E},
+ 'CRC-16/ARC (IBM)':{w:16,poly:0x8005,init:0,refin:true,refout:true,xorout:0,check:0xBB3D},
+ 'CRC-16/MODBUS':{w:16,poly:0x8005,init:0xFFFF,refin:true,refout:true,xorout:0,check:0x4B37},
+ 'CRC-16/USB':{w:16,poly:0x8005,init:0xFFFF,refin:true,refout:true,xorout:0xFFFF,check:0xB4C8},
+ 'CRC-16/DNP':{w:16,poly:0x3D65,init:0,refin:true,refout:true,xorout:0xFFFF,check:0xEA82},
+ 'CRC-32 (ISO-HDLC, zlib)':{w:32,poly:0x04C11DB7,init:0xFFFFFFFF,refin:true,refout:true,xorout:0xFFFFFFFF,check:0xCBF43926},
+ 'CRC-32C (Castagnoli)':{w:32,poly:0x1EDC6F41,init:0xFFFFFFFF,refin:true,refout:true,xorout:0xFFFFFFFF,check:0xE3069283},
+ 'CRC-32/BZIP2':{w:32,poly:0x04C11DB7,init:0xFFFFFFFF,refin:false,refout:false,xorout:0xFFFFFFFF,check:0xFC891918},
+ 'CRC-32/MPEG-2 (STM32 HW default)':{w:32,poly:0x04C11DB7,init:0xFFFFFFFF,refin:false,refout:false,xorout:0,check:0x0376E6E7},
+ 'CRC-32/JAMCRC':{w:32,poly:0x04C11DB7,init:0xFFFFFFFF,refin:true,refout:true,xorout:0,check:0x340BC6D9},
+ 'CRC-32/POSIX (cksum)':{w:32,poly:0x04C11DB7,init:0,refin:false,refout:false,xorout:0xFFFFFFFF,check:0x765E7680},
+};
+(function(){const sel=$('crcType');for(const k of Object.keys(CRC_CATALOG)){const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o)}
+ const o=document.createElement('option');o.value='custom';o.textContent='Custom…';sel.appendChild(o)})();
+
+function crcCalc(a,p){
+ const w=p.w,mask=w===32?0xFFFFFFFF:(1<<w)-1,top=2**(w-1);
+ let c=p.init>>>0;
+ for(let b of a){
+  if(p.refin)b=reflect(b,8);
+  c=(c^(b<<(w-8)))>>>0;
+  for(let i=0;i<8;i++)c=((c&top)?((c<<1)^p.poly):(c<<1))&mask;
+  c>>>=0;
+ }
+ if(p.refout)c=reflect(c,w);
+ return ((c^p.xorout)&mask)>>>0;
+}
+function currentParams(){
+ const t=$('crcType').value;
+ $('custom').style.display=t==='custom'?'grid':'none';
+ if(t!=='custom')return CRC_CATALOG[t];
+ const w=parseInt($('cw').value,10);
+ if(!(w>=8&&w<=32&&w%8===0))throw Error('Custom width must be 8, 16, 24 or 32');
+ const h=(id,name)=>{const s=$(id).value.trim().replace(/^0x/i,'');if(!/^[0-9a-f]{1,8}$/i.test(s))throw Error('Invalid hex in '+name);return parseInt(s,16)>>>0};
+ return{w,poly:h('cp','polynomial'),init:h('ci','init'),refin:$('crin').checked,refout:$('crout').checked,xorout:h('cx','XOR out')};
+}
+const crcBytes=(c,w,le)=>{const a=[];for(let i=0;i<w/8;i++)a.push((c>>>(8*i))&255);return le?a:a.reverse()};
+
+function crcUpdate(){
+ ['crc','crcver','crcapp','crcappb64'].forEach(id=>set(id,''));
+ let p;
+ try{p=currentParams()}catch(e){set('crc',e.message);$('crcParams').textContent='';return}
+ $('crcParams').textContent=`width=${p.w}  poly=${hx(p.poly,p.w/4)}  init=${hx(p.init,p.w/4)}  refin=${p.refin}  refout=${p.refout}  xorout=${hx(p.xorout,p.w/4)}`;
+ if(!bytes.length)return;
+ const le=$('crcEnd').value==='le',nb=p.w/8,d=p.w/4;
+ if($('already').checked){
+  if(bytes.length<=nb){set('crcver',`Need more than ${nb} byte(s) to verify a ${p.w}-bit CRC.`);return}
+  const payload=bytes.slice(0,-nb),tail=bytes.slice(-nb);
+  const calc=crcCalc(payload,p);
+  const rxBE=tail.reduce((a,b)=>(a*256+b),0)>>>0,rxLE=[...tail].reverse().reduce((a,b)=>(a*256+b),0)>>>0;
+  const rx=le?rxLE:rxBE;
+  set('crc',`Payload: ${payload.length} byte(s)\nCalculated: ${hx(calc,d)}  (${calc})\nReceived (${le?'LE':'BE'}): ${hx(rx,d)}  (${rx})`);
+  let msg;
+  if(rx===calc)msg=`✔ CRC MATCH (${le?'little':'big'}-endian)`;
+  else if((le?rxBE:rxLE)===calc)msg=`✔ CRC matches in the OTHER byte order (${le?'big':'little'}-endian). Change "CRC byte order".`;
+  else msg=`✘ CRC MISMATCH\nexpected ${hx(calc,d)}, received ${hx(rxBE,d)} (BE) / ${hx(rxLE,d)} (LE)`;
+  set('crcver',msg);$('crcver').className='out '+(msg.startsWith('✔')?'ok':'err');
+  return;
+ }
+ $('crcver').className='out';
+ const c=crcCalc(bytes,p),cb=crcBytes(c,p.w,le);
+ set('crc',`HEX: ${hx(c,d)}\nDECIMAL: ${c}\nBINARY: ${c.toString(2).padStart(p.w,'0')}\nBYTES BE: ${crcBytes(c,p.w,false).map(hex2).join(' ')}\nBYTES LE: ${crcBytes(c,p.w,true).map(hex2).join(' ')}`);
+ set('crcver','(enable "CRC is already appended" to verify a received frame)');
+ set('crcapp',bytes.concat(cb).map(hex2).join(' '));
+ set('crcappb64',b64(bytes.concat(cb)));
+}
+
+function selfTest(){
+ const data=textParse('123456789');let pass=0;const rows=[];
+ for(const [k,p] of Object.entries(CRC_CATALOG)){
+  const c=crcCalc(data,p),ok=c===p.check;if(ok)pass++;
+  rows.push(`<tr><td>${k}</td><td>${hx(p.check,p.w/4)}</td><td>${hx(c,p.w/4)}</td><td class="${ok?'ok':'err'}">${ok?'PASS':'FAIL'}</td></tr>`);
+ }
+ $('selftest').innerHTML=`<div class="${pass===rows.length?'ok':'err'}">${pass}/${rows.length} algorithms passed</div><table><thead><tr><th>Algorithm</th><th>Expected</th><th>Computed</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+
+/* ---------- utilities ---------- */
+function clearAll(){
+ bytes=[];document.querySelectorAll('.out').forEach(x=>{x.textContent='';x.className='out'});
+ $('numtbl').innerHTML='';$('input').value='';$('already').checked=false;
+ $('status').textContent='';$('selftest').innerHTML='';crcUpdate();
+}
+function loadFile(inp){
+ const f=inp.files[0];if(!f)return;
+ f.arrayBuffer().then(buf=>{
+  const a=[...new Uint8Array(buf)];
+  $('type').value='hex';$('input').value=a.map(hex2).join(' ');convert();
+  $('status').textContent=`Loaded ${f.name}: ${a.length} byte(s).`;inp.value='';
+ });
+}
+let toastT;
+document.addEventListener('click',e=>{
+ const el=e.target.closest('.out');if(!el||!el.textContent)return;
+ navigator.clipboard.writeText(el.textContent).then(()=>{
+  const t=$('toast');t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',900);
+ }).catch(()=>{});
+});
+let debounce;
+$('input').addEventListener('input',()=>{if(!$('auto').checked)return;clearTimeout(debounce);debounce=setTimeout(convert,150)});
+$('input').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))convert()});
+crcUpdate();
+</script>
+</body>
+</html>
